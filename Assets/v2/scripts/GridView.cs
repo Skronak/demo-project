@@ -14,7 +14,7 @@ public class GridView : MonoBehaviour
 
     [Header("Sol")]
     [SerializeField] bool showGround = true;
-    [SerializeField] Color groundColor = new Color(0.18f, 0.20f, 0.22f, 1f);
+    [SerializeField] Color groundColor = new Color(0.18f, 0.20f, 0.22f, 0f);
     [Tooltip("Optionnel. Sinon un matériau unlit est créé automatiquement.")]
     [SerializeField] Material groundMaterial;
 
