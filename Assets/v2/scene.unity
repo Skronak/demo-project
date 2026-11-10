@@ -129,6 +129,7 @@ GameObject:
   m_Component:
   - component: {fileID: 83876543}
   - component: {fileID: 83876542}
+  - component: {fileID: 83876544}
   m_Layer: 0
   m_Name: BuildSystem
   m_TagString: Untagged
@@ -156,8 +157,14 @@ MonoBehaviour:
   gridView: {fileID: 0}
   catalog:
   - {fileID: 11400000, guid: 35384528347b1dc498fed572da470697, type: 2}
-  - {fileID: 11400000, guid: 34aec35f932aa5345a368db27962749a, type: 2}
   - {fileID: 11400000, guid: 2f7705bffdd1f74478d5b22146e33f48, type: 2}
+  - {fileID: 11400000, guid: 36e27c3a2c2c0eb4a89b69db1adf66d1, type: 2}
+  - {fileID: 11400000, guid: 34aec35f932aa5345a368db27962749a, type: 2}
+  - {fileID: 11400000, guid: 9e0cc03fc653fd14c96a07bba3a02d0b, type: 2}
+  enableNumberHotkeys: 1
+  requireGround: 1
+  groundSide: 1
+  snapToGround: 1
   hoverColor: {r: 1, g: 1, b: 1, a: 0.25}
   validColor: {r: 0.2, g: 1, b: 0.3, a: 0.4}
   invalidColor: {r: 1, g: 0.2, b: 0.2, a: 0.4}
@@ -179,6 +186,28 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &83876544
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 83876541}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e702e99df5614d769e0b5197e32e139c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BuildMenuUI
+  buildSystem: {fileID: 0}
+  columns: 4
+  tileSize: {x: 120, y: 140}
+  spacing: 10
+  maxPanelHeight: 460
+  buttonLabel: Construire
+  buttonColor: {r: 0.2, g: 0.45, b: 0.85, a: 1}
+  panelColor: {r: 0.09, g: 0.1, b: 0.12, a: 0.95}
+  tileColor: {r: 0.2, g: 0.22, b: 0.26, a: 1}
+  tileHoverColor: {r: 0.3, g: 0.34, b: 0.4, a: 1}
 --- !u!1 &196196388
 GameObject:
   m_ObjectHideFlags: 0
@@ -228,7 +257,7 @@ MonoBehaviour:
   pitch: 90
   startYaw: 180
   rotateSmooth: 10
-  startZoom: 10
+  startZoom: 3
   minZoom: 3
   maxZoom: 60
   zoomStep: 0.12
@@ -399,8 +428,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e0665281260d6684292de735e0242eeb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NewMonoBehaviourScript
-  objectToPlace: {fileID: 0}
-  gridSize: 1
 --- !u!4 &1379539501
 Transform:
   m_ObjectHideFlags: 0

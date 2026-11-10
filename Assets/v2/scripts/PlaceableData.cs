@@ -29,11 +29,10 @@ public class PlaceableData : ScriptableObject
              "Elle est multipliée par la couleur : laissez la couleur blanche pour la voir telle quelle.")]
     public Texture2D texture;
 
-    [Tooltip("Optionnel. material du cube de remplacement (si pas de prefab). " +
-             "Elle est multipliée par la couleur : laissez la couleur blanche pour la voir telle quelle.")]
-    public Material material;
+    [Header("Interface")]
+    [Tooltip("Miniature affichée dans le menu de construction. Générable via Building > Generate Icons.")]
+    public Sprite icon;
 
-    
     public string Id => string.IsNullOrEmpty(id) ? name : id;
 
     void OnValidate()

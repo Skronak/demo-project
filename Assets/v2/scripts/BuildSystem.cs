@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.Rendering;
 
@@ -29,6 +30,17 @@ public class BuildSystem : MonoBehaviour
     [SerializeField] IsometricCameraController cameraController;
     [SerializeField] GridView gridView;
     [SerializeField] List<PlaceableData> catalog = new List<PlaceableData>();
+    [Tooltip("Garde les raccourcis clavier 1 à 9 en plus du menu.")]
+    [SerializeField] bool enableNumberHotkeys = true;
+
+    [Header("Sol")]
+    [Tooltip("Si coché, un objet ne peut être posé que s'il touche la ligne du sol.")]
+    [SerializeField] bool requireGround = true;
+    [Tooltip("Ligne qui sert de sol. FirstRow = y 0, LastRow = dernière ligne. " +
+             "Choisissez celle qui est en BAS de l'écran avec l'orientation de votre caméra.")]
+    [SerializeField] GroundSide groundSide = GroundSide.LastRow;
+    [Tooltip("L'objet se colle automatiquement au sol : seule sa position horizontale suit la souris.")]
+    [SerializeField] bool snapToGround = true;
 
     [Header("Couleurs de surbrillance")]
     [SerializeField] Color hoverColor = new Color(1f, 1f, 1f, 0.25f);
@@ -53,6 +65,11 @@ public class BuildSystem : MonoBehaviour
     Material highlightMaterial;
 
     Mode mode = Mode.Idle;
+
+    // Mode édition : la grille n'est visible et le placement possible que lorsqu'il est actif.
+    bool editMode;
+    public bool EditMode => editMode;
+    public event System.Action<bool> EditModeChanged;
     PlaceableData currentType;
     int currentRotation;
     int movingId;
@@ -112,7 +129,10 @@ public class BuildSystem : MonoBehaviour
         cellSize = Mathf.Max(0.01f, newCellSize);
 
         grid = new GridData(width, height, cellSize);
+        grid.RequireGround = requireGround;
+        grid.GroundSide = groundSide;
         gridView.Build(grid);
+        gridView.SetVisible(editMode);
 
         if (cameraController != null)
         {
@@ -140,12 +160,21 @@ public class BuildSystem : MonoBehaviour
 
         HandleHotkeys(kb);
 
+        // Pointeur sur l'interface : on n'interagit pas avec la grille.
+        if (IsPointerOverUI())
+        {
+            HideHighlight();
+            if (ghost != null) ghost.SetActive(false);
+            return;
+        }
+
         bool hasCell = TryGetMouseCell(out int cx, out int cy);
 
         switch (mode)
         {
             case Mode.Idle:
-                UpdateIdle(kb, mouse, hasCell, cx, cy);
+                if (editMode) UpdateIdle(kb, mouse, hasCell, cx, cy);
+                else HideHighlight(); // hors mode édition : aucune interaction avec la grille
                 break;
             case Mode.Placing:
             case Mode.Moving:
@@ -156,20 +185,24 @@ public class BuildSystem : MonoBehaviour
 
     void HandleHotkeys(Keyboard kb)
     {
-        for (int i = 0; i < 9 && i < catalog.Count; i++)
+        for (int i = 0; enableNumberHotkeys && i < 9 && i < catalog.Count; i++)
         {
             if (kb[Key.Digit1 + i].wasPressedThisFrame && catalog[i] != null)
                 StartPlacing(catalog[i]);
         }
 
-        if (kb.escapeKey.wasPressedThisFrame) CancelAction();
-        if (kb.gKey.wasPressedThisFrame) ToggleGrid();
+        if (kb.escapeKey.wasPressedThisFrame)
+        {
+            if (mode != Mode.Idle) CancelAction(); // 1er Échap : annule l'objet en cours
+            else SetEditMode(false);               // 2e Échap : quitte le mode édition
+        }
         if (kb.f5Key.wasPressedThisFrame) SaveGame();
         if (kb.f9Key.wasPressedThisFrame) LoadGame();
     }
 
     void UpdateIdle(Keyboard kb, Mouse mouse, bool hasCell, int cx, int cy)
     {
+        if (mouse.rightButton.wasPressedThisFrame) { SetEditMode(false); return; }
         if (!hasCell) { HideHighlight(); return; }
 
         int id = grid.GetIdAt(cx, cy);
@@ -202,6 +235,8 @@ public class BuildSystem : MonoBehaviour
         Vector2Int fp = GridData.Footprint(currentType.size, currentRotation);
         int ax = cx - fp.x / 2; // ancre : le curseur est (à peu près) au centre de l'objet
         int ay = cy - fp.y / 2;
+        if (requireGround && snapToGround)
+            ay = groundSide == GroundSide.FirstRow ? 0 : grid.Height - fp.y; // l'objet reste collé au sol
         int ignoreId = mode == Mode.Moving ? movingId : 0;
         bool valid = grid.CanPlace(ax, ay, fp.x, fp.y, ignoreId);
 
@@ -225,8 +260,36 @@ public class BuildSystem : MonoBehaviour
     // Actions
     // ------------------------------------------------------------------
 
+    public IReadOnlyList<PlaceableData> Catalog => catalog;
+
+    /// <summary>Sélectionne un type d'objet à placer (appelé par le menu de construction).</summary>
+    public void SelectPlaceable(PlaceableData type)
+    {
+        if (type != null) StartPlacing(type);
+    }
+
+    static bool IsPointerOverUI()
+    {
+        return EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
+    }
+
+    /// <summary>
+    /// Active / désactive le mode édition. Actif : la grille est affichée et on peut placer,
+    /// déplacer ou supprimer des objets. Inactif : grille masquée, aucune interaction.
+    /// </summary>
+    public void SetEditMode(bool value)
+    {
+        if (editMode == value) return;
+        editMode = value;
+
+        if (!value) CancelAction();
+        if (gridView != null) gridView.SetVisible(value);
+        EditModeChanged?.Invoke(value);
+    }
+
     void StartPlacing(PlaceableData type)
     {
+        SetEditMode(true); // choisir un objet (menu ou raccourci) active le mode édition
         CancelAction();
         currentType = type;
         currentRotation = 0;
@@ -365,16 +428,15 @@ public class BuildSystem : MonoBehaviour
             cube.transform.SetParent(root.transform, false);
             cube.transform.localPosition = new Vector3(0f, type.height * 0.5f, 0f);
             cube.transform.localScale = new Vector3(
-                type.size.x * grid.CellSize * 0.9f,
+                type.size.x * grid.CellSize,
                 type.height,
-                type.size.y * grid.CellSize * 0.9f);
+                type.size.y * grid.CellSize);
 
             var r = cube.GetComponent<Renderer>();
             if (!placeholderMaterials.TryGetValue(type, out var mat))
             {
                 mat = new Material(r.sharedMaterial) { color = type.color }; // un matériau partagé par type
                 if (type.texture != null) mat.mainTexture = type.texture;
-                if (type.material != null) mat.mainTexture = type.material.mainTexture;
                 placeholderMaterials.Add(type, mat);
             }
             r.sharedMaterial = mat;

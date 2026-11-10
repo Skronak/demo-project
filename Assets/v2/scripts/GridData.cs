@@ -1,6 +1,13 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+/// <summary>Ligne de la grille qui sert de sol.</summary>
+public enum GroundSide
+{
+    FirstRow, // y = 0
+    LastRow   // y = Height - 1
+}
+
 /// <summary>Un objet posé sur la grille (données pures, aucune référence Unity lourde).</summary>
 public class PlacedEntry
 {
@@ -22,6 +29,10 @@ public class GridData
     public readonly int Height;
     public readonly float CellSize;
     public readonly Vector3 Origin;
+
+    /// <summary>Si vrai, un objet ne peut être posé que s'il touche la ligne du sol.</summary>
+    public bool RequireGround;
+    public GroundSide GroundSide = GroundSide.FirstRow;
 
     readonly int[] cells;
     readonly Dictionary<int, PlacedEntry> entries = new Dictionary<int, PlacedEntry>();
@@ -87,6 +98,7 @@ public class GridData
     public bool CanPlace(int x, int y, int sx, int sy, int ignoreId = 0)
     {
         if (x < 0 || y < 0 || x + sx > Width || y + sy > Height) return false;
+        if (RequireGround && !TouchesGround(y, sy)) return false;
         for (int j = y; j < y + sy; j++)
         {
             int row = j * Width;
@@ -98,6 +110,10 @@ public class GridData
         }
         return true;
     }
+
+    /// <summary>Vrai si une empreinte occupant les lignes y .. y+sy-1 touche la ligne du sol.</summary>
+    public bool TouchesGround(int y, int sy) =>
+        GroundSide == GroundSide.FirstRow ? y == 0 : y + sy == Height;
 
     // ---------- Modifications ----------
 
