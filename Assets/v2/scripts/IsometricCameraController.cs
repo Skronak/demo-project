@@ -36,6 +36,7 @@ public class IsometricCameraController : MonoBehaviour
     Vector3 boundsMax = new Vector3(1000, 0, 1000);
 
     public Camera Camera => cam;
+    public float MaxZoom => maxZoom;
 
     void Awake()
     {

@@ -29,6 +29,8 @@ public class BuildSystem : MonoBehaviour
     [SerializeField] Camera cam;
     [SerializeField] IsometricCameraController cameraController;
     [SerializeField] GridView gridView;
+    [Tooltip("Optionnel : sol décoratif autour de la grille. Trouvé automatiquement dans la scène si vide.")]
+    [SerializeField] GroundView groundView;
     [SerializeField] List<PlaceableData> catalog = new List<PlaceableData>();
     [Tooltip("Garde les raccourcis clavier 1 à 9 en plus du menu.")]
     [SerializeField] bool enableNumberHotkeys = true;
@@ -87,6 +89,7 @@ public class BuildSystem : MonoBehaviour
         if (cam == null) cam = cameraController != null ? cameraController.Camera : Camera.main;
         if (gridView == null) gridView = GetComponent<GridView>();
         if (gridView == null) gridView = gameObject.AddComponent<GridView>();
+        if (groundView == null) groundView = FindFirstObjectByType<GroundView>();
 
         foreach (var t in catalog)
         {
@@ -133,6 +136,7 @@ public class BuildSystem : MonoBehaviour
         grid.GroundSide = groundSide;
         gridView.Build(grid);
         gridView.SetVisible(editMode);
+        if (groundView != null) groundView.Build(grid);
 
         if (cameraController != null)
         {
