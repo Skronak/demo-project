@@ -53,18 +53,18 @@ public class GroundView : MonoBehaviour
     Material bodyMaterial;
     Material stripMaterial;
     GridData lastGrid;
+    float lastExtentScale = 1f;
     IsometricCameraController rig;
 
     /// <summary>(Re)construit le sol pour la grille donnée. Appelé par BuildSystem.</summary>
-    public void Build(GridData grid)
+    public void Build(GridData grid, float extentScale = 1f)
     {
         lastGrid = grid;
+        lastExtentScale = extentScale;
 
-        // La géométrie est construite directement en coordonnées monde.
-        transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
-        transform.localScale = Vector3.one;
-
-        float e = extent > 0f ? extent : AutoExtent();
+        // La géométrie est construite en coordonnées locales : l'objet (une couche) peut être déplacé
+        // et mis à l'échelle. extentScale agrandit le sol pour compenser la réduction des couches lointaines.
+        float e = (extent > 0f ? extent : AutoExtent()) * extentScale;
         float x0 = grid.Origin.x - e;
         float x1 = grid.Origin.x + grid.Width * grid.CellSize + e;
         float y = grid.Origin.y + height;
@@ -96,7 +96,7 @@ public class GroundView : MonoBehaviour
         }
 
         // Corps du sol
-        EnsurePart(ref bodyObject, ref bodyMesh, ref bodyMaterial, "GroundBody", 2998);
+        EnsurePart(ref bodyObject, ref bodyMesh, ref bodyMaterial, "GroundBody", 3000);
         float tile = Mathf.Max(0.01f, textureTileSize);
         SetQuad(bodyMesh, x0, x1, bodyZ0, bodyZ1, y, 0f, (x1 - x0) / tile, 0f, (bodyZ1 - bodyZ0) / tile);
         bodyMaterial.color = groundColor;
@@ -113,7 +113,7 @@ public class GroundView : MonoBehaviour
         // Bande de surface (rue ou herbe), légèrement au-dessus pour passer devant le corps
         if ((showEdgeStrip || useStreet) && stripThickness > 0f)
         {
-            EnsurePart(ref stripObject, ref stripMesh, ref stripMaterial, "GroundStrip", 2999);
+            EnsurePart(ref stripObject, ref stripMesh, ref stripMaterial, "GroundStrip", 3000);
 
             if (useStreet)
             {
@@ -200,7 +200,7 @@ public class GroundView : MonoBehaviour
     // Permet de régler l'apparence dans l'inspecteur pendant que le jeu tourne.
     void OnValidate()
     {
-        if (Application.isPlaying && lastGrid != null) Build(lastGrid);
+        if (Application.isPlaying && lastGrid != null) Build(lastGrid, lastExtentScale);
     }
 
     void OnDestroy()

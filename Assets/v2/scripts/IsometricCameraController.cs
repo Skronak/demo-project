@@ -39,6 +39,9 @@ public class IsometricCameraController : MonoBehaviour
     public float MaxZoom => maxZoom;
     public float StartYaw => startYaw;
 
+    /// <summary>Point du sol visé par la caméra (le pivot).</summary>
+    public Vector3 FocusPoint => transform.position;
+
     void Awake()
     {
         if (cam == null) cam = GetComponentInChildren<Camera>();

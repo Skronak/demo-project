@@ -92,7 +92,7 @@ public class BuildMenuUI : MonoBehaviour
     // Construction de l'interface
     // ------------------------------------------------------------------
 
-    static void EnsureEventSystem()
+    public static void EnsureEventSystem()
     {
         var es = FindFirstObjectByType<EventSystem>();
         if (es == null)

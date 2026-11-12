@@ -130,6 +130,7 @@ GameObject:
   - component: {fileID: 83876543}
   - component: {fileID: 83876542}
   - component: {fileID: 83876544}
+  - component: {fileID: 83876545}
   m_Layer: 0
   m_Name: BuildSystem
   m_TagString: Untagged
@@ -152,16 +153,29 @@ MonoBehaviour:
   width: 20
   height: 5
   cellSize: 1
+  maxLayers: 5
+  initialLayerCount: 1
+  layerSizes: []
+  layerSpacing: 2
+  layerScaleFactor: 0.8
+  layerTransitionTime: 0.35
+  groundTemplates: []
   cam: {fileID: 0}
   cameraController: {fileID: 0}
-  gridView: {fileID: 0}
-  groundView: {fileID: 0}
   catalog:
   - {fileID: 11400000, guid: 35384528347b1dc498fed572da470697, type: 2}
   - {fileID: 11400000, guid: 2f7705bffdd1f74478d5b22146e33f48, type: 2}
   - {fileID: 11400000, guid: 36e27c3a2c2c0eb4a89b69db1adf66d1, type: 2}
+  - {fileID: 11400000, guid: 9155e3a5d5f157e4b8b6c93a9c3498de, type: 2}
+  - {fileID: 11400000, guid: b8daeb5c5f16449479189e226ed5bd59, type: 2}
+  - {fileID: 11400000, guid: 60cce10e2ccc7de438327fb5c80aef1f, type: 2}
   - {fileID: 11400000, guid: 34aec35f932aa5345a368db27962749a, type: 2}
   - {fileID: 11400000, guid: 9e0cc03fc653fd14c96a07bba3a02d0b, type: 2}
+  - {fileID: 11400000, guid: 9e0cc03fc653fd14c96a07bba3a02d0b, type: 2}
+  - {fileID: 11400000, guid: 248f26988725d574ca855620df5941e0, type: 2}
+  - {fileID: 11400000, guid: 3a49dde8832760d468d2590160a1b8bb, type: 2}
+  - {fileID: 11400000, guid: 8e3de1f02ed649748a796647494019ac, type: 2}
+  - {fileID: 11400000, guid: 35db65b5d0618ce488ae234077d8cb94, type: 2}
   enableNumberHotkeys: 1
   requireGround: 1
   groundSide: 1
@@ -213,6 +227,29 @@ MonoBehaviour:
   panelColor: {r: 0.09, g: 0.1, b: 0.12, a: 0.95}
   tileColor: {r: 0.2, g: 0.22, b: 0.26, a: 1}
   tileHoverColor: {r: 0.3, g: 0.34, b: 0.4, a: 1}
+--- !u!114 &83876545
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 83876541}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2300a5a5164142ddb0d0339d3e09cb16, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::LayerBarUI
+  buildSystem: {fileID: 0}
+  buttonSize: {x: 64, y: 64}
+  spacing: 8
+  margin: {x: 20, y: 20}
+  maxGridSize: 500
+  layerColor: {r: 0.2, g: 0.22, b: 0.26, a: 0.95}
+  activeColor: {r: 0.2, g: 0.45, b: 0.85, a: 1}
+  addColor: {r: 0.25, g: 0.6, b: 0.35, a: 1}
+  removeColor: {r: 0.75, g: 0.3, b: 0.25, a: 1}
+  toolColor: {r: 0.35, g: 0.38, b: 0.45, a: 1}
+  panelColor: {r: 0.09, g: 0.1, b: 0.12, a: 0.95}
 --- !u!1 &131841598
 GameObject:
   m_ObjectHideFlags: 0
@@ -460,119 +497,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 196196389}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1132980635
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1132980639}
-  - component: {fileID: 1132980638}
-  - component: {fileID: 1132980637}
-  - component: {fileID: 1132980636}
-  m_Layer: 0
-  m_Name: Plane
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!64 &1132980636
-MeshCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1132980635}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 5
-  m_Convex: 0
-  m_CookingOptions: 30
-  m_Mesh: {fileID: 10209, guid: 0000000000000000e000000000000000, type: 0}
---- !u!23 &1132980637
-MeshRenderer:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1132980635}
-  m_Enabled: 1
-  m_CastShadows: 1
-  m_ReceiveShadows: 1
-  m_DynamicOccludee: 1
-  m_StaticShadowCaster: 0
-  m_MotionVectors: 1
-  m_LightProbeUsage: 1
-  m_ReflectionProbeUsage: 1
-  m_RayTracingMode: 2
-  m_RayTraceProcedural: 0
-  m_RayTracingAccelStructBuildFlagsOverride: 0
-  m_RayTracingAccelStructBuildFlags: 1
-  m_SmallMeshCulling: 1
-  m_ForceMeshLod: -1
-  m_MeshLodSelectionBias: 0
-  m_RenderingLayerMask: 1
-  m_RendererPriority: 0
-  m_Materials:
-  - {fileID: 2100000, guid: 31321ba15b8f8eb4c954353edc038b1d, type: 2}
-  m_StaticBatchInfo:
-    firstSubMesh: 0
-    subMeshCount: 0
-  m_StaticBatchRoot: {fileID: 0}
-  m_ProbeAnchor: {fileID: 0}
-  m_LightProbeVolumeOverride: {fileID: 0}
-  m_ScaleInLightmap: 1
-  m_ReceiveGI: 1
-  m_PreserveUVs: 0
-  m_IgnoreNormalsForChartDetection: 0
-  m_ImportantGI: 0
-  m_StitchLightmapSeams: 1
-  m_SelectedEditorRenderState: 3
-  m_MinimumChartSize: 4
-  m_AutoUVMaxDistance: 0.5
-  m_AutoUVMaxAngle: 89
-  m_LightmapParameters: {fileID: 0}
-  m_GlobalIlluminationMeshLod: 0
-  m_SortingLayerID: 0
-  m_SortingLayer: 0
-  m_SortingOrder: 0
-  m_MaskInteraction: 0
-  m_AdditionalVertexStreams: {fileID: 0}
---- !u!33 &1132980638
-MeshFilter:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1132980635}
-  m_Mesh: {fileID: 10209, guid: 0000000000000000e000000000000000, type: 0}
---- !u!4 &1132980639
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1132980635}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0.7071068, z: -0.7071068, w: 0}
-  m_LocalPosition: {x: 0, y: 1.86, z: -7.42}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 90, y: 180, z: 0}
 --- !u!1 &1845890116
 GameObject:
   m_ObjectHideFlags: 0
@@ -735,8 +659,8 @@ MonoBehaviour:
   showEdgeStrip: 1
   edgeColor: {r: 0.3, g: 0.65, b: 0.25, a: 1}
   edgeThickness: 0.1
-  streetTexture: {fileID: 2800000, guid: bb6c637d2f580194781a8cb90cdf2d48, type: 3}
-  streetTileWidth: 4
+  streetTexture: {fileID: 2800000, guid: 71ab32e6c1713dc459880f873d405fde, type: 3}
+  streetTileWidth: 2
   streetFlipHorizontal: 1
   streetFlipVertical: 0
   extent: 0
@@ -765,5 +689,4 @@ SceneRoots:
   - {fileID: 83876543}
   - {fileID: 196196389}
   - {fileID: 131841599}
-  - {fileID: 1132980639}
   - {fileID: 1996738506}

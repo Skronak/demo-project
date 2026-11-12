@@ -12,9 +12,24 @@ public struct PlacedObjectData
 }
 
 [Serializable]
+public class LayerSaveData
+{
+    public string name;
+    public int width;
+    public int height;
+    public float cellSize;
+    public List<PlacedObjectData> objects = new List<PlacedObjectData>();
+}
+
+[Serializable]
 public class SaveData
 {
-    public int version = 1;
+    public int version = 2;
+    public int activeLayer;
+    public List<LayerSaveData> layers = new List<LayerSaveData>();
+
+    // Champs de l'ancien format (version 1 : une seule grille). Ils ne sont plus écrits,
+    // mais restent lus pour charger les anciennes sauvegardes dans la première couche.
     public int width;
     public int height;
     public float cellSize;
@@ -22,17 +37,18 @@ public class SaveData
 }
 
 /// <summary>
-/// Sauvegarde / chargement en JSON. On ne stocke que les dimensions et la liste des objets :
-/// la grille d'occupation se reconstruit au chargement.
+/// Sauvegarde / chargement en JSON. On ne stocke que, pour chaque couche, les dimensions
+/// et la liste des objets : la grille d'occupation se reconstruit au chargement.
 /// </summary>
 public static class SaveSystem
 {
     public static string DefaultPath => Path.Combine(Application.persistentDataPath, "grid_save.json");
 
-    public static SaveData CreateSaveData(GridData grid)
+    public static LayerSaveData CreateLayerData(GridData grid, string name)
     {
-        var data = new SaveData
+        var data = new LayerSaveData
         {
+            name = name,
             width = grid.Width,
             height = grid.Height,
             cellSize = grid.CellSize
@@ -51,12 +67,11 @@ public static class SaveSystem
         return data;
     }
 
-    public static void Save(GridData grid, string path = null)
+    public static void Save(SaveData data, string path = null)
     {
         path = string.IsNullOrEmpty(path) ? DefaultPath : path;
-        string json = JsonUtility.ToJson(CreateSaveData(grid), true);
-        File.WriteAllText(path, json);
-        Debug.Log($"Grille sauvegardée : {path} ({grid.Count} objets)");
+        File.WriteAllText(path, JsonUtility.ToJson(data, true));
+        Debug.Log($"Sauvegarde : {path} ({data.layers.Count} couche(s))");
     }
 
     public static bool TryLoad(out SaveData data, string path = null)
@@ -68,12 +83,32 @@ public static class SaveSystem
         try
         {
             data = JsonUtility.FromJson<SaveData>(File.ReadAllText(path));
-            return data != null && data.width > 0 && data.height > 0;
         }
         catch (Exception ex)
         {
             Debug.LogError($"Lecture de la sauvegarde impossible : {ex.Message}");
             return false;
         }
+
+        if (data == null) return false;
+
+        // Ancien format : une seule grille -> première couche.
+        if ((data.layers == null || data.layers.Count == 0) && data.width > 0 && data.height > 0)
+        {
+            data.layers = new List<LayerSaveData>
+            {
+                new LayerSaveData
+                {
+                    name = "Couche 1",
+                    width = data.width,
+                    height = data.height,
+                    cellSize = data.cellSize,
+                    objects = data.objects ?? new List<PlacedObjectData>()
+                }
+            };
+            data.activeLayer = 0;
+        }
+
+        return data.layers != null && data.layers.Count > 0;
     }
 }

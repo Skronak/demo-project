@@ -5,32 +5,50 @@ using UnityEngine.InputSystem;
 using UnityEngine.Rendering;
 
 /// <summary>
-/// Chef d'orchestre : possède la grille (GridData), génère l'affichage (GridView),
-/// gère le placement / déplacement / suppression et la sauvegarde.
+/// Chef d'orchestre : gère les couches (chacune avec sa grille, son sol et ses objets),
+/// le mode édition, le placement / déplacement / suppression sur la couche active, et la sauvegarde.
+///
+/// Les couches sont empilées en profondeur : la couche active est au premier plan, les autres
+/// sont derrière (dans l'ordre de leur numéro), plus petites et plus basses sur l'axe Y.
 ///
 /// Contrôles :
-///   1..9        : choisir un objet du catalogue et le placer
-///   Clic gauche : poser l'objet (mode placement) / saisir un objet pour le déplacer (mode normal)
-///   R           : pivoter de 90° pendant le placement / déplacement
-///   Clic droit ou Échap : annuler
-///   Suppr / X   : supprimer l'objet survolé
-///   F5 / F9     : sauvegarder / charger
+///   Choisir un objet (menu ou touches 1..9) : active le mode édition
+///   Clic gauche : poser / saisir un objet pour le déplacer
+///   R : pivoter (hors sprites)   Clic droit ou Échap : annuler / quitter l'édition
+///   Suppr / X : supprimer l'objet survolé   F5 / F9 : sauvegarder / charger
 /// </summary>
 public class BuildSystem : MonoBehaviour
 {
     enum Mode { Idle, Placing, Moving }
 
-    [Header("Grille (paramétrable)")]
+    [Header("Grille par défaut (nouvelles couches)")]
     [SerializeField] int width = 30;
     [SerializeField] int height = 30;
     [SerializeField] float cellSize = 1f;
 
+    [Header("Couches")]
+    [Tooltip("Nombre maximum de couches.")]
+    [SerializeField, Range(1, 8)] int maxLayers = 5;
+    [Tooltip("Nombre de couches au lancement.")]
+    [SerializeField, Range(1, 8)] int initialLayerCount = 1;
+    [Tooltip("Taille propre à chaque couche (couche 1 = première entrée, etc.). " +
+             "Une couche sans entrée valide utilise la grille par défaut.")]
+    [SerializeField] List<Vector2Int> layerSizes = new List<Vector2Int>();
+    [Tooltip("Distance entre deux couches sur l'axe Y (la profondeur pour la caméra).")]
+    [SerializeField] float layerSpacing = 2f;
+    [Tooltip("La caméra est orthographique : l'éloignement ne rétrécit pas les objets. " +
+             "Ce facteur le fait à la place : la couche juste derrière est à ce facteur, la suivante à son carré, etc.")]
+    [SerializeField, Range(0.3f, 1f)] float layerScaleFactor = 0.8f;
+    [Tooltip("Durée de l'animation quand on change de couche active (secondes).")]
+    [SerializeField] float layerTransitionTime = 0.35f;
+    [Tooltip("Sol et rue de chaque couche : la couche i utilise le modèle i (le dernier s'il y en a moins). " +
+             "Chaque modèle est un objet avec un composant GroundView (prefab ou objet de scène). " +
+             "Vide = le GroundView présent dans la scène sert de modèle à toutes les couches.")]
+    [SerializeField] List<GroundView> groundTemplates = new List<GroundView>();
+
     [Header("Références")]
     [SerializeField] Camera cam;
     [SerializeField] IsometricCameraController cameraController;
-    [SerializeField] GridView gridView;
-    [Tooltip("Optionnel : sol décoratif autour de la grille. Trouvé automatiquement dans la scène si vide.")]
-    [SerializeField] GroundView groundView;
     [SerializeField] List<PlaceableData> catalog = new List<PlaceableData>();
     [Tooltip("Garde les raccourcis clavier 1 à 9 en plus du menu.")]
     [SerializeField] bool enableNumberHotkeys = true;
@@ -63,33 +81,46 @@ public class BuildSystem : MonoBehaviour
     [SerializeField] Color ghostValidColor = new Color(0.3f, 1f, 0.4f, 0.55f);
     [SerializeField] Color ghostInvalidColor = new Color(1f, 0.3f, 0.3f, 0.55f);
 
-    Material ghostMaterialInstance;
+    // --- Couches ---
+    readonly List<BuildLayer> layers = new List<BuildLayer>();
+    int activeIndex;
+    Transform layersRoot;
 
-    GridData grid;
-    readonly Dictionary<int, GameObject> views = new Dictionary<int, GameObject>();
+    // La couche active, et raccourcis vers ses données.
+    BuildLayer Active => layers[activeIndex];
+    GridData grid => Active.Grid;
+    Dictionary<int, GameObject> views => Active.Views;
+
     readonly Dictionary<string, PlaceableData> byId = new Dictionary<string, PlaceableData>();
     readonly Dictionary<PlaceableData, Material> placeholderMaterials = new Dictionary<PlaceableData, Material>();
     readonly Dictionary<PlaceableData, Material> spriteMaterials = new Dictionary<PlaceableData, Material>();
     Mesh spriteQuadMesh;
+
+    Transform highlight;
+    Material highlightMaterial;
+    Material ghostMaterialInstance;
     Material ghostSpriteInstance; // matériau du fantôme quand l'objet est un sprite
     Material activeGhostMaterial; // matériau à teinter (vert / rouge) selon la validité
 
-    Transform objectsRoot;
-    Transform highlight;
-    Material highlightMaterial;
-
     Mode mode = Mode.Idle;
-
-    // Mode édition : la grille n'est visible et le placement possible que lorsqu'il est actif.
-    bool editMode;
-    public bool EditMode => editMode;
-    public event System.Action<bool> EditModeChanged;
     PlaceableData currentType;
     int currentRotation;
     int movingId;
     GameObject ghost;
 
-    public GridData Grid => grid;
+    // Mode édition : la grille n'est visible et le placement possible que lorsqu'il est actif.
+    bool editMode;
+    public bool EditMode => editMode;
+    public event System.Action<bool> EditModeChanged;
+
+    // --- API publique des couches ---
+    public int LayerCount => layers.Count;
+    public int MaxLayers => maxLayers;
+    public int ActiveLayerIndex => activeIndex;
+    public GridData ActiveGrid => grid;
+    public event System.Action LayersChanged;
+
+    public IReadOnlyList<PlaceableData> Catalog => catalog;
 
     // ------------------------------------------------------------------
     // Initialisation
@@ -99,9 +130,6 @@ public class BuildSystem : MonoBehaviour
     {
         if (cameraController == null) cameraController = FindFirstObjectByType<IsometricCameraController>();
         if (cam == null) cam = cameraController != null ? cameraController.Camera : Camera.main;
-        if (gridView == null) gridView = GetComponent<GridView>();
-        if (gridView == null) gridView = gameObject.AddComponent<GridView>();
-        if (groundView == null) groundView = FindFirstObjectByType<GroundView>();
 
         foreach (var t in catalog)
         {
@@ -110,14 +138,14 @@ public class BuildSystem : MonoBehaviour
             else byId.Add(t.Id, t);
         }
 
-        objectsRoot = new GameObject("PlacedObjects").transform;
-        objectsRoot.SetParent(transform, false);
+        // Racine des couches : à l'origine du monde, indépendante de la position de ce composant.
+        layersRoot = new GameObject("Layers").transform;
 
         var hl = new GameObject("Highlight");
-        hl.transform.SetParent(transform, false);
+        hl.transform.SetParent(layersRoot, false);
         hl.AddComponent<MeshFilter>().sharedMesh = GridMaterials.UnitQuad();
         var mr = hl.AddComponent<MeshRenderer>();
-        highlightMaterial = GridMaterials.CreateUnlit(hoverColor, 3002);
+        highlightMaterial = GridMaterials.CreateUnlit(hoverColor, 3000);
         mr.sharedMaterial = highlightMaterial;
         mr.shadowCastingMode = ShadowCastingMode.Off;
         mr.receiveShadows = false;
@@ -127,35 +155,32 @@ public class BuildSystem : MonoBehaviour
         // Une seule instance de matériau pour tous les fantômes (un seul fantôme existe à la fois).
         ghostMaterialInstance = ghostMaterial != null
             ? new Material(ghostMaterial)
-            : GridMaterials.CreateUnlit(ghostValidColor, 3003);
-        ghostMaterialInstance.renderQueue = 3003; // au-dessus de la grille et de la surbrillance
+            : GridMaterials.CreateUnlit(ghostValidColor, 3000);
+        ghostMaterialInstance.renderQueue = 3000;
 
-        GenerateGrid(width, height, cellSize);
-    }
-
-    /// <summary>(Re)génère une grille vide de la taille demandée. Supprime les objets existants.</summary>
-    public void GenerateGrid(int newWidth, int newHeight, float newCellSize)
-    {
-        CancelAction();
-        ClearViews();
-
-        width = Mathf.Max(1, newWidth);
-        height = Mathf.Max(1, newHeight);
-        cellSize = Mathf.Max(0.01f, newCellSize);
-
-        grid = new GridData(width, height, cellSize);
-        grid.RequireGround = requireGround;
-        grid.GroundSide = groundSide;
-        gridView.Build(grid);
-        gridView.SetVisible(editMode);
-        if (groundView != null) groundView.Build(grid);
-
-        if (cameraController != null)
+        // Modèles de sol : ceux de la liste, sinon le GroundView déjà présent dans la scène.
+        if (groundTemplates.Count == 0)
         {
-            cameraController.FocusOn(grid.Center);
-            cameraController.SetBounds(grid.Origin,
-                grid.Origin + new Vector3(width * cellSize, 0f, height * cellSize));
+            var sceneGround = FindFirstObjectByType<GroundView>();
+            if (sceneGround != null) groundTemplates.Add(sceneGround);
         }
+
+        int count = Mathf.Clamp(initialLayerCount, 1, maxLayers);
+        for (int i = 0; i < count; i++)
+        {
+            var size = SizeForLayer(i);
+            CreateLayer(size.x, size.y, cellSize);
+        }
+
+        // Les objets de scène servant de modèles ne doivent pas s'afficher eux-mêmes.
+        foreach (var t in groundTemplates)
+        {
+            if (t != null && t.gameObject.scene.IsValid()) t.gameObject.SetActive(false);
+        }
+
+        activeIndex = 0;
+        ApplyActiveLayer(true);
+        if (cameraController != null) cameraController.FocusOn(grid.Center);
     }
 
 #if UNITY_EDITOR
@@ -163,13 +188,216 @@ public class BuildSystem : MonoBehaviour
     void OnValidate()
     {
         if (spriteShader == null) spriteShader = Shader.Find("Building/SpriteSheetURP");
+        initialLayerCount = Mathf.Min(initialLayerCount, maxLayers);
     }
 #endif
 
-    [ContextMenu("Regenerate Grid")]
+    [ContextMenu("Regenerate Active Layer With Default Size")]
     void RegenerateFromInspector()
     {
         if (Application.isPlaying) GenerateGrid(width, height, cellSize);
+    }
+
+    Vector2Int SizeForLayer(int index)
+    {
+        if (index < layerSizes.Count && layerSizes[index].x > 0 && layerSizes[index].y > 0)
+            return layerSizes[index];
+        return new Vector2Int(Mathf.Max(1, width), Mathf.Max(1, height));
+    }
+
+    // ------------------------------------------------------------------
+    // Couches
+    // ------------------------------------------------------------------
+
+    // Les couches lointaines sont mises à l'échelle : le sol doit rester assez large pour couvrir la vue.
+    float GroundExtentScale => 1f / Mathf.Pow(layerScaleFactor, Mathf.Max(0, maxLayers - 1));
+
+    GroundView PickGroundTemplate(int index)
+    {
+        if (groundTemplates.Count == 0) return null;
+        return groundTemplates[Mathf.Min(index, groundTemplates.Count - 1)];
+    }
+
+    BuildLayer CreateLayer(int w, int h, float cs)
+    {
+        var layer = new BuildLayer { Name = "Couche " + (layers.Count + 1) };
+
+        // Chaque couche a son propre sol et sa propre rue : copie du modèle correspondant.
+        GroundView template = PickGroundTemplate(layers.Count);
+        GameObject rootGO = template != null ? Instantiate(template.gameObject) : new GameObject();
+        rootGO.name = layer.Name;
+        rootGO.SetActive(true);
+
+        var rt = rootGO.transform;
+        rt.SetParent(layersRoot, false);
+        rt.localPosition = Vector3.zero;
+        rt.localRotation = Quaternion.identity;
+        rt.localScale = Vector3.one;
+        layer.Root = rootGO;
+
+        layer.GroundView = rootGO.GetComponentInChildren<GroundView>(true);
+        if (layer.GroundView == null) layer.GroundView = rootGO.AddComponent<GroundView>();
+
+        layer.GridView = rootGO.AddComponent<GridView>();
+        layer.GridView.SetShowGround(false); // le sol est dessiné par GroundView
+
+        var objects = new GameObject("PlacedObjects").transform;
+        objects.SetParent(rootGO.transform, false);
+        layer.ObjectsRoot = objects;
+
+        layers.Add(layer);
+        RebuildLayerGrid(layer, w, h, cs);
+        return layer;
+    }
+
+    void RebuildLayerGrid(BuildLayer layer, int w, int h, float cs)
+    {
+        foreach (var kv in layer.Views)
+            if (kv.Value != null) Destroy(kv.Value);
+        layer.Views.Clear();
+
+        layer.Grid = new GridData(w, h, cs) { RequireGround = requireGround, GroundSide = groundSide };
+        layer.GridView.Build(layer.Grid);
+        layer.GroundView.Build(layer.Grid, GroundExtentScale);
+    }
+
+    void ClearLayers()
+    {
+        foreach (var l in layers)
+            if (l.Root != null) Destroy(l.Root);
+        layers.Clear();
+    }
+
+    /// <summary>Recalcule profondeurs cibles, visibilité de la grille, surbrillance et limites de la caméra.</summary>
+    void ApplyActiveLayer(bool instant)
+    {
+        // La couche active passe au premier plan ; les autres restent derrière, dans l'ordre de leur numéro.
+        int rank = 1;
+        for (int i = 0; i < layers.Count; i++)
+        {
+            var l = layers[i];
+            l.TargetDepth = i == activeIndex ? 0f : rank++;
+            if (instant)
+            {
+                l.Depth = l.TargetDepth;
+                l.DepthVelocity = 0f;
+            }
+            l.GridView.SetVisible(i == activeIndex && editMode);
+        }
+
+        highlight.SetParent(Active.Root.transform, false);
+        HideHighlight();
+        UpdateCameraBounds();
+        if (instant) UpdateLayerTransforms(true);
+
+        LayersChanged?.Invoke();
+    }
+
+    void UpdateCameraBounds()
+    {
+        if (cameraController == null) return;
+        var g = grid;
+        cameraController.SetBounds(g.Origin,
+            g.Origin + new Vector3(g.Width * g.CellSize, 0f, g.Height * g.CellSize));
+    }
+
+    void LateUpdate()
+    {
+        if (layers.Count > 0) UpdateLayerTransforms(false);
+    }
+
+    // Place chaque couche selon sa profondeur : décalage sur Y + réduction d'échelle autour du point visé
+    // par la caméra (effet de perspective avec une caméra orthographique, et léger parallaxe au déplacement).
+    void UpdateLayerTransforms(bool instant)
+    {
+        Vector3 focus = cameraController != null ? cameraController.FocusPoint : Vector3.zero;
+
+        foreach (var l in layers)
+        {
+            if (!instant)
+            {
+                l.Depth = Mathf.SmoothDamp(l.Depth, l.TargetDepth, ref l.DepthVelocity, layerTransitionTime);
+                if (Mathf.Abs(l.Depth - l.TargetDepth) < 0.002f)
+                {
+                    l.Depth = l.TargetDepth;
+                    l.DepthVelocity = 0f;
+                }
+            }
+
+            float s = Mathf.Pow(layerScaleFactor, l.Depth);
+            var t = l.Root.transform;
+            t.localScale = Vector3.one * s;
+            t.localPosition = new Vector3(focus.x * (1f - s), -l.Depth * layerSpacing, focus.z * (1f - s));
+        }
+    }
+
+    /// <summary>Ajoute une couche (si le maximum n'est pas atteint) et la rend active.</summary>
+    public bool AddLayer()
+    {
+        if (layers.Count >= maxLayers) return false;
+
+        CancelAction();
+        var size = SizeForLayer(layers.Count);
+        CreateLayer(size.x, size.y, cellSize);
+        activeIndex = layers.Count - 1;
+        ApplyActiveLayer(false);
+        return true;
+    }
+
+    /// <summary>Supprime une couche et tous ses objets. Il en reste toujours au moins une.</summary>
+    public bool RemoveLayer(int index)
+    {
+        if (layers.Count <= 1 || index < 0 || index >= layers.Count) return false;
+
+        CancelAction();
+        Destroy(layers[index].Root);
+        layers.RemoveAt(index);
+
+        for (int i = 0; i < layers.Count; i++)
+        {
+            layers[i].Name = "Couche " + (i + 1);
+            layers[i].Root.name = layers[i].Name;
+        }
+
+        if (index < activeIndex) activeIndex--;
+        else if (index == activeIndex) activeIndex = Mathf.Min(index, layers.Count - 1);
+
+        ApplyActiveLayer(false);
+        return true;
+    }
+
+    /// <summary>Amène une couche au premier plan et la rend éditable.</summary>
+    public void SetActiveLayer(int index)
+    {
+        index = Mathf.Clamp(index, 0, layers.Count - 1);
+        if (index == activeIndex) return;
+
+        CancelAction();
+        activeIndex = index;
+        ApplyActiveLayer(false);
+    }
+
+    /// <summary>Redimensionne la grille d'une couche. Ses objets sont supprimés.</summary>
+    public void ResizeLayer(int index, int newWidth, int newHeight)
+    {
+        if (index < 0 || index >= layers.Count) return;
+
+        var l = layers[index];
+        if (index == activeIndex) CancelAction();
+
+        RebuildLayerGrid(l, Mathf.Max(1, newWidth), Mathf.Max(1, newHeight), l.Grid.CellSize);
+        if (index == activeIndex) UpdateCameraBounds();
+        LayersChanged?.Invoke();
+    }
+
+    /// <summary>Régénère la grille de la couche active (taille et case données). Ses objets sont supprimés.</summary>
+    public void GenerateGrid(int newWidth, int newHeight, float newCellSize)
+    {
+        CancelAction();
+        RebuildLayerGrid(Active, Mathf.Max(1, newWidth), Mathf.Max(1, newHeight), Mathf.Max(0.01f, newCellSize));
+        UpdateCameraBounds();
+        if (cameraController != null) cameraController.FocusOn(grid.Center);
+        LayersChanged?.Invoke();
     }
 
     // ------------------------------------------------------------------
@@ -180,7 +408,10 @@ public class BuildSystem : MonoBehaviour
     {
         var kb = Keyboard.current;
         var mouse = Mouse.current;
-        if (kb == null || mouse == null || grid == null) return;
+        if (kb == null || mouse == null || layers.Count == 0) return;
+
+        // Pas de raccourcis pendant la saisie dans un champ de l'interface.
+        if (IsTypingInUI()) return;
 
         HandleHotkeys(kb);
 
@@ -247,6 +478,7 @@ public class BuildSystem : MonoBehaviour
     void UpdateGhostMode(Keyboard kb, Mouse mouse, bool hasCell, int cx, int cy)
     {
         if (mouse.rightButton.wasPressedThisFrame) { CancelAction(); return; }
+
         // Les sprites 2D restent toujours droits : pas de rotation.
         if (kb.rKey.wasPressedThisFrame && !IsSprite(currentType)) currentRotation = (currentRotation + 1) & 3;
 
@@ -262,6 +494,7 @@ public class BuildSystem : MonoBehaviour
         int ay = cy - fp.y / 2;
         if (requireGround && snapToGround)
             ay = groundSide == GroundSide.FirstRow ? 0 : grid.Height - fp.y; // l'objet reste collé au sol
+
         int ignoreId = mode == Mode.Moving ? movingId : 0;
         bool valid = grid.CanPlace(ax, ay, fp.x, fp.y, ignoreId);
 
@@ -272,7 +505,8 @@ public class BuildSystem : MonoBehaviour
         if (ghost != null)
         {
             ghost.SetActive(true);
-            PositionView(ghost, ax, ay, fp.x, fp.y, currentRotation);
+            PositionView(Active, ghost, ax, ay, fp.x, fp.y, currentRotation);
+            ghost.transform.localPosition += Vector3.up * 0.04f; // le fantôme passe devant la surbrillance
         }
 
         if (valid && mouse.leftButton.wasPressedThisFrame)
@@ -286,8 +520,6 @@ public class BuildSystem : MonoBehaviour
     // Actions
     // ------------------------------------------------------------------
 
-    public IReadOnlyList<PlaceableData> Catalog => catalog;
-
     /// <summary>Sélectionne un type d'objet à placer (appelé par le menu de construction).</summary>
     public void SelectPlaceable(PlaceableData type)
     {
@@ -299,9 +531,17 @@ public class BuildSystem : MonoBehaviour
         return EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
     }
 
+    static bool IsTypingInUI()
+    {
+        var es = EventSystem.current;
+        if (es == null || es.currentSelectedGameObject == null) return false;
+        var input = es.currentSelectedGameObject.GetComponent<UnityEngine.UI.InputField>();
+        return input != null && input.isFocused;
+    }
+
     /// <summary>
-    /// Active / désactive le mode édition. Actif : la grille est affichée et on peut placer,
-    /// déplacer ou supprimer des objets. Inactif : grille masquée, aucune interaction.
+    /// Active / désactive le mode édition. Actif : la grille de la couche active est affichée et on peut
+    /// placer, déplacer ou supprimer des objets. Inactif : grille masquée, aucune interaction.
     /// </summary>
     public void SetEditMode(bool value)
     {
@@ -309,7 +549,7 @@ public class BuildSystem : MonoBehaviour
         editMode = value;
 
         if (!value) CancelAction();
-        if (gridView != null) gridView.SetVisible(value);
+        if (layers.Count > 0) Active.GridView.SetVisible(value);
         EditModeChanged?.Invoke(value);
     }
 
@@ -328,8 +568,8 @@ public class BuildSystem : MonoBehaviour
         int id = grid.Place(currentType.Id, ax, ay, currentRotation, fp.x, fp.y);
         if (id == 0) return;
 
-        var view = CreateView(currentType);
-        PositionView(view, ax, ay, fp.x, fp.y, currentRotation);
+        var view = CreateView(Active, currentType);
+        PositionView(Active, view, ax, ay, fp.x, fp.y, currentRotation);
         views.Add(id, view);
     }
 
@@ -352,7 +592,7 @@ public class BuildSystem : MonoBehaviour
         if (grid.Move(movingId, ax, ay, currentRotation, fp.x, fp.y))
         {
             var view = views[movingId];
-            PositionView(view, ax, ay, fp.x, fp.y, currentRotation);
+            PositionView(Active, view, ax, ay, fp.x, fp.y, currentRotation);
         }
         CancelAction(); // remet l'original visible et quitte le mode déplacement
     }
@@ -369,7 +609,8 @@ public class BuildSystem : MonoBehaviour
 
     void CancelAction()
     {
-        if (mode == Mode.Moving && views.TryGetValue(movingId, out var original) && original != null)
+        if (layers.Count > 0 && mode == Mode.Moving
+            && views.TryGetValue(movingId, out var original) && original != null)
             original.SetActive(true);
 
         if (ghost != null) Destroy(ghost);
@@ -386,15 +627,12 @@ public class BuildSystem : MonoBehaviour
     // Sauvegarde / chargement
     // ------------------------------------------------------------------
 
-    /// <summary>Affiche / masque la grille. Les objets posés restent visibles.</summary>
-    public void ToggleGrid()
-    {
-        gridView.Toggle();
-    }
-
     public void SaveGame()
     {
-        SaveSystem.Save(grid);
+        var data = new SaveData { activeLayer = activeIndex };
+        foreach (var l in layers)
+            data.layers.Add(SaveSystem.CreateLayerData(l.Grid, l.Name));
+        SaveSystem.Save(data);
     }
 
     public void LoadGame()
@@ -405,65 +643,81 @@ public class BuildSystem : MonoBehaviour
             return;
         }
 
-        GenerateGrid(data.width, data.height, data.cellSize);
+        CancelAction();
+        ClearLayers();
 
-        foreach (var o in data.objects)
+        int count = Mathf.Min(data.layers.Count, maxLayers);
+        if (data.layers.Count > maxLayers)
+            Debug.LogWarning($"La sauvegarde contient {data.layers.Count} couches : seules les {maxLayers} premières sont chargées.");
+
+        for (int i = 0; i < count; i++)
         {
-            if (!byId.TryGetValue(o.typeId, out var type))
-            {
-                Debug.LogWarning($"Type inconnu dans la sauvegarde : {o.typeId}");
-                continue;
-            }
+            var ld = data.layers[i];
+            var layer = CreateLayer(ld.width, ld.height, ld.cellSize > 0f ? ld.cellSize : cellSize);
 
-            int rot = IsSprite(type) ? 0 : GridData.NormalizeRotation(o.rotation);
-            Vector2Int fp = GridData.Footprint(type.size, rot);
-            int id = grid.Place(type.Id, o.x, o.y, rot, fp.x, fp.y);
-            if (id == 0)
+            foreach (var o in ld.objects)
             {
-                Debug.LogWarning($"Objet ignoré (position invalide) : {o.typeId} en ({o.x},{o.y})");
-                continue;
-            }
+                if (!byId.TryGetValue(o.typeId, out var type))
+                {
+                    Debug.LogWarning($"Type inconnu dans la sauvegarde : {o.typeId}");
+                    continue;
+                }
 
-            var view = CreateView(type);
-            PositionView(view, o.x, o.y, fp.x, fp.y, rot);
-            views.Add(id, view);
+                int rot = IsSprite(type) ? 0 : GridData.NormalizeRotation(o.rotation);
+                Vector2Int fp = GridData.Footprint(type.size, rot);
+                int id = layer.Grid.Place(type.Id, o.x, o.y, rot, fp.x, fp.y);
+                if (id == 0)
+                {
+                    Debug.LogWarning($"Objet ignoré (position invalide) : {o.typeId} en ({o.x},{o.y}) couche {i + 1}");
+                    continue;
+                }
+
+                var view = CreateView(layer, type);
+                PositionView(layer, view, o.x, o.y, fp.x, fp.y, rot);
+                layer.Views.Add(id, view);
+            }
         }
 
-        Debug.Log($"Grille chargée : {data.width}x{data.height}, {grid.Count} objets");
+        activeIndex = Mathf.Clamp(data.activeLayer, 0, layers.Count - 1);
+        ApplyActiveLayer(true);
+        if (cameraController != null) cameraController.FocusOn(grid.Center);
+
+        Debug.Log($"Sauvegarde chargée : {layers.Count} couche(s)");
     }
 
     // ------------------------------------------------------------------
     // Visuels
     // ------------------------------------------------------------------
 
-    GameObject CreateView(PlaceableData type)
+    GameObject CreateView(BuildLayer layer, PlaceableData type)
     {
         GameObject root;
+        float cs = layer.Grid.CellSize;
 
         if (type.prefab != null)
         {
-            root = Instantiate(type.prefab, objectsRoot);
+            root = Instantiate(type.prefab, layer.ObjectsRoot);
             // Les prefabs sont conçus pour des cases de 1 unité : on les met à l'échelle de la grille.
-            root.transform.localScale = type.prefab.transform.localScale * grid.CellSize;
+            root.transform.localScale = type.prefab.transform.localScale * cs;
         }
         else if (type.visual == PlaceableVisual.Sprite)
         {
-            root = CreateSpriteView(type);
+            root = CreateSpriteView(layer, type);
         }
         else
         {
             // Cube de remplacement : pivot au centre de l'empreinte, au sol.
             root = new GameObject(type.name + "_placeholder");
-            root.transform.SetParent(objectsRoot, false);
+            root.transform.SetParent(layer.ObjectsRoot, false);
 
             var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
             Destroy(cube.GetComponent<Collider>());
             cube.transform.SetParent(root.transform, false);
             cube.transform.localPosition = new Vector3(0f, type.height * 0.5f, 0f);
             cube.transform.localScale = new Vector3(
-                type.size.x * grid.CellSize,
+                type.size.x * cs,
                 type.height,
-                type.size.y * grid.CellSize);
+                type.size.y * cs);
 
             var r = cube.GetComponent<Renderer>();
             if (!placeholderMaterials.TryGetValue(type, out var mat))
@@ -498,15 +752,16 @@ public class BuildSystem : MonoBehaviour
     /// Objet 2D : un quad posé à plat (plan XZ) qui remplit l'empreinte de l'objet,
     /// tourné pour être droit à l'écran, avec transparence et animation éventuelle.
     /// </summary>
-    GameObject CreateSpriteView(PlaceableData type)
+    GameObject CreateSpriteView(BuildLayer layer, PlaceableData type)
     {
         var root = new GameObject(type.name + "_sprite");
-        root.transform.SetParent(objectsRoot, false);
+        root.transform.SetParent(layer.ObjectsRoot, false);
 
+        float cs = layer.Grid.CellSize;
         float yaw = SpriteYawValue;
         bool swap = (Mathf.RoundToInt(yaw / 90f) & 1) == 1;
-        float w = (swap ? type.size.y : type.size.x) * grid.CellSize;
-        float d = (swap ? type.size.x : type.size.y) * grid.CellSize;
+        float w = (swap ? type.size.y : type.size.x) * cs;
+        float d = (swap ? type.size.x : type.size.y) * cs;
 
         var quad = new GameObject("Sprite");
         quad.transform.SetParent(root.transform, false);
@@ -527,6 +782,8 @@ public class BuildSystem : MonoBehaviour
     }
 
     // Un matériau partagé par type : toutes les copies sont animées ensemble, sans coût CPU.
+    // Tout le contenu transparent utilise la file de rendu 3000 : l'ordre entre couches (et à l'intérieur
+    // d'une couche) est alors donné par la profondeur, c'est-à-dire par les décalages sur l'axe Y.
     Material GetSpriteMaterial(PlaceableData type)
     {
         if (spriteMaterials.TryGetValue(type, out var material)) return material;
@@ -553,7 +810,7 @@ public class BuildSystem : MonoBehaviour
             material.SetFloat("_Fps", type.framesPerSecond);
         }
 
-        material.renderQueue = 3000; // sous les lignes de la grille (3001) et la surbrillance (3002)
+        material.renderQueue = 3000;
         spriteMaterials.Add(type, material);
         return material;
     }
@@ -576,10 +833,10 @@ public class BuildSystem : MonoBehaviour
         return mesh;
     }
 
-    /// <summary>Crée une copie de l'objet rendue avec le matériau fantôme, sans colliders.</summary>
+    /// <summary>Crée une copie de l'objet (sur la couche active) rendue avec le matériau fantôme, sans colliders.</summary>
     GameObject CreateGhost(PlaceableData type)
     {
-        var g = CreateView(type);
+        var g = CreateView(Active, type);
 
         // Un sprite garde sa texture (et son animation) : son fantôme est une copie teintée et semi-transparente.
         // Les autres objets utilisent le matériau fantôme uni.
@@ -588,7 +845,7 @@ public class BuildSystem : MonoBehaviour
         if (IsSprite(type))
         {
             ghostSpriteInstance = new Material(GetSpriteMaterial(type));
-            ghostSpriteInstance.renderQueue = 3003;
+            ghostSpriteInstance.renderQueue = 3000;
             ghostMat = ghostSpriteInstance;
         }
         activeGhostMaterial = ghostMat;
@@ -607,24 +864,17 @@ public class BuildSystem : MonoBehaviour
         return g;
     }
 
-    void PositionView(GameObject view, int x, int y, int sx, int sy, int rotation)
+    // Coordonnées locales : la couche (Root) peut être déplacée et mise à l'échelle.
+    void PositionView(BuildLayer layer, GameObject view, int x, int y, int sx, int sy, int rotation)
     {
-        view.transform.SetPositionAndRotation(
-            grid.FootprintCenter(x, y, sx, sy),
-            Quaternion.Euler(0f, rotation * 90f, 0f));
-    }
-
-    void ClearViews()
-    {
-        foreach (var kv in views)
-            if (kv.Value != null) Destroy(kv.Value);
-        views.Clear();
+        view.transform.localPosition = layer.Grid.FootprintCenter(x, y, sx, sy);
+        view.transform.localRotation = Quaternion.Euler(0f, rotation * 90f, 0f);
     }
 
     void ShowHighlight(int x, int y, int sx, int sy, Color color)
     {
         highlight.gameObject.SetActive(true);
-        highlight.position = grid.CellToWorld(x, y) + Vector3.up * 0.03f;
+        highlight.localPosition = grid.CellToWorld(x, y) + Vector3.up * 0.03f;
         highlight.localScale = new Vector3(sx * grid.CellSize, 1f, sy * grid.CellSize);
         highlightMaterial.color = color;
     }
@@ -635,7 +885,7 @@ public class BuildSystem : MonoBehaviour
     }
 
     // ------------------------------------------------------------------
-    // Souris -> case (raycast mathématique sur un plan, aucun collider)
+    // Souris -> case de la couche active (raycast mathématique sur un plan, aucun collider)
     // ------------------------------------------------------------------
 
     bool TryGetMouseCell(out int x, out int y)
@@ -644,9 +894,12 @@ public class BuildSystem : MonoBehaviour
         if (cam == null) return false;
 
         Ray ray = cam.ScreenPointToRay(Mouse.current.position.ReadValue());
-        var plane = new Plane(Vector3.up, grid.Origin);
+        Transform layerT = Active.Root.transform;
+        var plane = new Plane(Vector3.up, layerT.TransformPoint(grid.Origin));
         if (!plane.Raycast(ray, out float distance)) return false;
 
-        return grid.WorldToCell(ray.GetPoint(distance), out x, out y);
+        // Conversion dans le repère local de la couche (échelle et décalage inclus).
+        Vector3 local = layerT.InverseTransformPoint(ray.GetPoint(distance));
+        return grid.WorldToCell(local, out x, out y);
     }
 }

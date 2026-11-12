@@ -13,8 +13,8 @@ public class GridView : MonoBehaviour
     [SerializeField] Material lineMaterial;
 
     [Header("Sol")]
-    [SerializeField] bool showGround = false;
-    [SerializeField] Color groundColor = new Color(0.18f, 0.20f, 0.22f, 0f);
+    [SerializeField] bool showGround = false; // le sol est désormais dessiné par GroundView
+    [SerializeField] Color groundColor = new Color(0.18f, 0.20f, 0.22f, 1f);
     [Tooltip("Optionnel. Sinon un matériau unlit est créé automatiquement.")]
     [SerializeField] Material groundMaterial;
 
@@ -30,6 +30,11 @@ public class GridView : MonoBehaviour
     bool initialized;
 
     public bool IsVisible => visible;
+
+    public void SetShowGround(bool value)
+    {
+        showGround = value;
+    }
 
     public void Build(GridData grid)
     {
@@ -69,7 +74,7 @@ public class GridView : MonoBehaviour
             lineMesh = new Mesh { name = "GridLinesMesh", indexFormat = IndexFormat.UInt32 };
             linesObject.AddComponent<MeshFilter>().sharedMesh = lineMesh;
             var mr = linesObject.AddComponent<MeshRenderer>();
-            mr.sharedMaterial = lineMaterial != null ? lineMaterial : GridMaterials.CreateUnlit(Color.white, 3001);
+            mr.sharedMaterial = lineMaterial != null ? lineMaterial : GridMaterials.CreateUnlit(Color.white, 3000);
             mr.shadowCastingMode = ShadowCastingMode.Off;
             mr.receiveShadows = false;
         }
