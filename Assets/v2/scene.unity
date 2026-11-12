@@ -166,6 +166,8 @@ MonoBehaviour:
   requireGround: 1
   groundSide: 1
   snapToGround: 1
+  spriteShader: {fileID: 4800000, guid: 79800198607b6354287e85a9d7702bd4, type: 3}
+  spriteYaw: -1
   hoverColor: {r: 1, g: 1, b: 1, a: 0.25}
   validColor: {r: 0.2, g: 1, b: 0.3, a: 0.4}
   invalidColor: {r: 1, g: 0.2, b: 0.2, a: 0.4}

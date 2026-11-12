@@ -38,7 +38,7 @@ public class BuildMenuUI : MonoBehaviour
     ScrollRect scroll;
     Font font;
     bool isOpen;
-    readonly Dictionary<Texture2D, Sprite> spriteCache = new Dictionary<Texture2D, Sprite>();
+    readonly Dictionary<PlaceableData, Sprite> spriteCache = new Dictionary<PlaceableData, Sprite>();
 
     void Start()
     {
@@ -272,11 +272,18 @@ public class BuildMenuUI : MonoBehaviour
         if (data.icon != null) return data.icon;
         if (data.texture == null) return null;
 
-        if (!spriteCache.TryGetValue(data.texture, out var sprite))
+        if (!spriteCache.TryGetValue(data, out var sprite))
         {
             var t = data.texture;
-            sprite = Sprite.Create(t, new Rect(0, 0, t.width, t.height), new Vector2(0.5f, 0.5f));
-            spriteCache.Add(t, sprite);
+            int cols = Mathf.Max(1, data.sheetColumns);
+            int rows = Mathf.Max(1, data.sheetRows);
+            float fw = t.width / (float)cols;
+            float fh = t.height / (float)rows;
+
+            // Pour une feuille de sprites : miniature = première image (en haut à gauche).
+            sprite = Sprite.Create(t, new Rect(0f, t.height - fh, fw, fh), new Vector2(0.5f, 0.5f),
+                                   100f, 0, SpriteMeshType.FullRect);
+            spriteCache.Add(data, sprite);
         }
         return sprite;
     }

@@ -44,6 +44,14 @@ public class BuildSystem : MonoBehaviour
     [Tooltip("L'objet se colle automatiquement au sol : seule sa position horizontale suit la souris.")]
     [SerializeField] bool snapToGround = true;
 
+    [Header("Sprites 2D (objets sans prefab)")]
+    [Tooltip("Shader Building/SpriteSheetURP (assigné automatiquement dans l'éditeur). " +
+             "Affiche les sprites avec transparence et animation.")]
+    [SerializeField] Shader spriteShader;
+    [Tooltip("Rotation (degrés, multiple de 90) appliquée aux sprites pour qu'ils soient droits à l'écran. " +
+             "-1 = automatique, d'après le yaw de départ de la caméra.")]
+    [SerializeField] float spriteYaw = -1f;
+
     [Header("Couleurs de surbrillance")]
     [SerializeField] Color hoverColor = new Color(1f, 1f, 1f, 0.25f);
     [SerializeField] Color validColor = new Color(0.2f, 1f, 0.3f, 0.4f);
@@ -61,6 +69,10 @@ public class BuildSystem : MonoBehaviour
     readonly Dictionary<int, GameObject> views = new Dictionary<int, GameObject>();
     readonly Dictionary<string, PlaceableData> byId = new Dictionary<string, PlaceableData>();
     readonly Dictionary<PlaceableData, Material> placeholderMaterials = new Dictionary<PlaceableData, Material>();
+    readonly Dictionary<PlaceableData, Material> spriteMaterials = new Dictionary<PlaceableData, Material>();
+    Mesh spriteQuadMesh;
+    Material ghostSpriteInstance; // matériau du fantôme quand l'objet est un sprite
+    Material activeGhostMaterial; // matériau à teinter (vert / rouge) selon la validité
 
     Transform objectsRoot;
     Transform highlight;
@@ -146,6 +158,14 @@ public class BuildSystem : MonoBehaviour
         }
     }
 
+#if UNITY_EDITOR
+    // Référence le shader dans le composant pour qu'il soit inclus dans les builds.
+    void OnValidate()
+    {
+        if (spriteShader == null) spriteShader = Shader.Find("Building/SpriteSheetURP");
+    }
+#endif
+
     [ContextMenu("Regenerate Grid")]
     void RegenerateFromInspector()
     {
@@ -227,7 +247,8 @@ public class BuildSystem : MonoBehaviour
     void UpdateGhostMode(Keyboard kb, Mouse mouse, bool hasCell, int cx, int cy)
     {
         if (mouse.rightButton.wasPressedThisFrame) { CancelAction(); return; }
-        if (kb.rKey.wasPressedThisFrame) currentRotation = (currentRotation + 1) & 3;
+        // Les sprites 2D restent toujours droits : pas de rotation.
+        if (kb.rKey.wasPressedThisFrame && !IsSprite(currentType)) currentRotation = (currentRotation + 1) & 3;
 
         if (!hasCell)
         {
@@ -245,7 +266,8 @@ public class BuildSystem : MonoBehaviour
         bool valid = grid.CanPlace(ax, ay, fp.x, fp.y, ignoreId);
 
         ShowHighlight(ax, ay, fp.x, fp.y, valid ? validColor : invalidColor);
-        ghostMaterialInstance.color = valid ? ghostValidColor : ghostInvalidColor;
+        var tintMaterial = activeGhostMaterial != null ? activeGhostMaterial : ghostMaterialInstance;
+        tintMaterial.color = valid ? ghostValidColor : ghostInvalidColor;
 
         if (ghost != null)
         {
@@ -352,6 +374,9 @@ public class BuildSystem : MonoBehaviour
 
         if (ghost != null) Destroy(ghost);
         ghost = null;
+        if (ghostSpriteInstance != null) Destroy(ghostSpriteInstance);
+        ghostSpriteInstance = null;
+        activeGhostMaterial = null;
         movingId = 0;
         mode = Mode.Idle;
         HideHighlight();
@@ -390,7 +415,7 @@ public class BuildSystem : MonoBehaviour
                 continue;
             }
 
-            int rot = GridData.NormalizeRotation(o.rotation);
+            int rot = IsSprite(type) ? 0 : GridData.NormalizeRotation(o.rotation);
             Vector2Int fp = GridData.Footprint(type.size, rot);
             int id = grid.Place(type.Id, o.x, o.y, rot, fp.x, fp.y);
             if (id == 0)
@@ -421,6 +446,10 @@ public class BuildSystem : MonoBehaviour
             // Les prefabs sont conçus pour des cases de 1 unité : on les met à l'échelle de la grille.
             root.transform.localScale = type.prefab.transform.localScale * grid.CellSize;
         }
+        else if (type.visual == PlaceableVisual.Sprite)
+        {
+            root = CreateSpriteView(type);
+        }
         else
         {
             // Cube de remplacement : pivot au centre de l'empreinte, au sol.
@@ -449,10 +478,120 @@ public class BuildSystem : MonoBehaviour
         return root;
     }
 
+    static bool IsSprite(PlaceableData type)
+    {
+        return type != null && type.prefab == null && type.visual == PlaceableVisual.Sprite;
+    }
+
+    float SpriteYawValue
+    {
+        get
+        {
+            float yaw = spriteYaw >= 0f
+                ? spriteYaw
+                : (cameraController != null ? cameraController.StartYaw : 0f);
+            return Mathf.Round(yaw / 90f) * 90f;
+        }
+    }
+
+    /// <summary>
+    /// Objet 2D : un quad posé à plat (plan XZ) qui remplit l'empreinte de l'objet,
+    /// tourné pour être droit à l'écran, avec transparence et animation éventuelle.
+    /// </summary>
+    GameObject CreateSpriteView(PlaceableData type)
+    {
+        var root = new GameObject(type.name + "_sprite");
+        root.transform.SetParent(objectsRoot, false);
+
+        float yaw = SpriteYawValue;
+        bool swap = (Mathf.RoundToInt(yaw / 90f) & 1) == 1;
+        float w = (swap ? type.size.y : type.size.x) * grid.CellSize;
+        float d = (swap ? type.size.x : type.size.y) * grid.CellSize;
+
+        var quad = new GameObject("Sprite");
+        quad.transform.SetParent(root.transform, false);
+        quad.transform.localPosition = new Vector3(0f, 0.01f, 0f);
+        quad.transform.localRotation = Quaternion.Euler(0f, yaw, 0f);
+        quad.transform.localScale = new Vector3(w, 1f, d);
+
+        if (spriteQuadMesh == null) spriteQuadMesh = CreateCenteredQuad();
+        quad.AddComponent<MeshFilter>().sharedMesh = spriteQuadMesh;
+
+        var mr = quad.AddComponent<MeshRenderer>();
+        mr.sharedMaterial = GetSpriteMaterial(type);
+        mr.shadowCastingMode = ShadowCastingMode.Off;
+        mr.receiveShadows = false;
+        mr.lightProbeUsage = LightProbeUsage.Off;
+        mr.reflectionProbeUsage = ReflectionProbeUsage.Off;
+        return root;
+    }
+
+    // Un matériau partagé par type : toutes les copies sont animées ensemble, sans coût CPU.
+    Material GetSpriteMaterial(PlaceableData type)
+    {
+        if (spriteMaterials.TryGetValue(type, out var material)) return material;
+
+        Shader shader = spriteShader != null ? spriteShader : Shader.Find("Building/SpriteSheetURP");
+        if (shader == null)
+        {
+            Debug.LogWarning("Shader « Building/SpriteSheetURP » introuvable : ajoutez SpriteSheetURP.shader au projet. " +
+                             "Repli sur Sprites/Default (transparence mais sans animation).");
+            shader = Shader.Find("Sprites/Default");
+        }
+
+        material = new Material(shader) { color = type.color };
+        if (type.texture != null) material.mainTexture = type.texture;
+
+        if (material.HasProperty("_Columns"))
+        {
+            int cols = Mathf.Max(1, type.sheetColumns);
+            int rows = Mathf.Max(1, type.sheetRows);
+            int frames = type.frameCount > 0 ? type.frameCount : cols * rows;
+            material.SetFloat("_Columns", cols);
+            material.SetFloat("_Rows", rows);
+            material.SetFloat("_FrameCount", frames);
+            material.SetFloat("_Fps", type.framesPerSecond);
+        }
+
+        material.renderQueue = 3000; // sous les lignes de la grille (3001) et la surbrillance (3002)
+        spriteMaterials.Add(type, material);
+        return material;
+    }
+
+    // Quad 1x1 centré à l'origine, posé à plat sur XZ, normale vers le haut.
+    static Mesh CreateCenteredQuad()
+    {
+        var mesh = new Mesh { name = "SpriteQuadXZ" };
+        mesh.vertices = new[]
+        {
+            new Vector3(-0.5f, 0f, -0.5f),
+            new Vector3(-0.5f, 0f,  0.5f),
+            new Vector3( 0.5f, 0f,  0.5f),
+            new Vector3( 0.5f, 0f, -0.5f)
+        };
+        mesh.uv = new[] { new Vector2(0, 0), new Vector2(0, 1), new Vector2(1, 1), new Vector2(1, 0) };
+        mesh.triangles = new[] { 0, 1, 2, 0, 2, 3 };
+        mesh.normals = new[] { Vector3.up, Vector3.up, Vector3.up, Vector3.up };
+        mesh.RecalculateBounds();
+        return mesh;
+    }
+
     /// <summary>Crée une copie de l'objet rendue avec le matériau fantôme, sans colliders.</summary>
     GameObject CreateGhost(PlaceableData type)
     {
         var g = CreateView(type);
+
+        // Un sprite garde sa texture (et son animation) : son fantôme est une copie teintée et semi-transparente.
+        // Les autres objets utilisent le matériau fantôme uni.
+        if (ghostSpriteInstance != null) { Destroy(ghostSpriteInstance); ghostSpriteInstance = null; }
+        Material ghostMat = ghostMaterialInstance;
+        if (IsSprite(type))
+        {
+            ghostSpriteInstance = new Material(GetSpriteMaterial(type));
+            ghostSpriteInstance.renderQueue = 3003;
+            ghostMat = ghostSpriteInstance;
+        }
+        activeGhostMaterial = ghostMat;
 
         foreach (var c in g.GetComponentsInChildren<Collider>())
             Destroy(c);
@@ -460,7 +599,7 @@ public class BuildSystem : MonoBehaviour
         foreach (var r in g.GetComponentsInChildren<Renderer>())
         {
             var mats = new Material[Mathf.Max(1, r.sharedMaterials.Length)];
-            for (int i = 0; i < mats.Length; i++) mats[i] = ghostMaterialInstance;
+            for (int i = 0; i < mats.Length; i++) mats[i] = ghostMat;
             r.sharedMaterials = mats;
             r.shadowCastingMode = ShadowCastingMode.Off;
             r.receiveShadows = false;

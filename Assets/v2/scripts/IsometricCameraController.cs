@@ -37,6 +37,7 @@ public class IsometricCameraController : MonoBehaviour
 
     public Camera Camera => cam;
     public float MaxZoom => maxZoom;
+    public float StartYaw => startYaw;
 
     void Awake()
     {
